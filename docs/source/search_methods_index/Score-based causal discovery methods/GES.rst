@@ -16,6 +16,20 @@ Usage
     from causallearn.search.ScoreBased.GES import ges
     Record = ges(X, score_func, maxP, parameters)
 
+    # Visualization using pydot
+    from causallearn.utils.GraphUtils import GraphUtils
+    import matplotlib.image as mpimg
+    import matplotlib.pyplot as plt
+    import io
+
+    pyd = GraphUtils.to_pydot(Record['G'])
+    tmp_png = pyd.create_png(f="png")
+    fp = io.BytesIO(tmp_png)
+    img = mpimg.imread(fp, format='png')
+    plt.axis('off')
+    plt.imshow(img)
+    plt.show()
+
 Visualization using pydot is recommended (`usage example <https://github.com/cmu-phil/causal-learn/blob/e4e73f8b58510a3cd5a9125ba50c0ac62a425ef3/tests/TestGES.py#L16>`_). If specific label names are needed, please refer to this `usage example <https://github.com/cmu-phil/causal-learn/blob/e4e73f8b58510a3cd5a9125ba50c0ac62a425ef3/tests/TestGraphVisualization.py#L106>`_ (e.g., GraphUtils.to_pydot(Record['G'], labels=["A", "B", "C"]).
 
 Parameters
