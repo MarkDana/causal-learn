@@ -1,11 +1,12 @@
 import os, time
+import random
 import sys
 sys.path.append("")
 import unittest
 import hashlib
 import numpy as np
 from causallearn.search.ConstraintBased.PC import pc
-from causallearn.utils.cit import chisq, fisherz, gsq, kci, mv_fisherz
+from causallearn.utils.cit import chisq, fisherz, gsq, kci, mv_fisherz, d_separation
 from causallearn.graph.SHD import SHD
 from causallearn.utils.DAG2CPDAG import dag2cpdag
 from causallearn.utils.TXT2GeneralGraph import txt2generalgraph
@@ -288,7 +289,7 @@ class TestPC(unittest.TestCase):
 
         print('test_pc_load_bnlearn_discrete_datasets passed!\n')
 
-
+    # Test the usage of cache local checkpoint (check speed).
     def test_pc_with_citest_local_checkpoint(self):
         print('Now start test_pc_with_citest_local_checkpoint ...')
         data_path = "./TestData/data_linear_10.txt"
@@ -309,3 +310,103 @@ class TestPC(unittest.TestCase):
         assert np.all(cg1.G.graph == cg2.G.graph), INCONSISTENT_RESULT_GRAPH_ERRMSG
 
         print('test_pc_with_citest_local_checkpoint passed!\n')
+
+    # Test graphs in bnlearn repository with d-separation as cit. Ensure correctness.
+    def test_pc_load_bnlearn_graphs_with_d_separation(self):
+        print('Now start test_pc_load_bnlearn_graphs_with_d_separation ...')
+        benchmark_names = [
+            "asia", "cancer", "earthquake", "sachs", "survey",
+            "alarm", "barley", "child", "insurance", "water",
+            "hailfinder", "hepar2", "win95pts",
+            # "andes",
+        ]
+        bnlearn_truth_dag_graph_dir = './TestData/bnlearn_discrete_10000/truth_dag_graph'
+        for bname in benchmark_names:
+            truth_dag = txt2generalgraph(os.path.join(bnlearn_truth_dag_graph_dir, f'{bname}.graph.txt'))
+            truth_cpdag = dag2cpdag(truth_dag)
+            num_edges_in_truth = truth_dag.get_num_edges()
+            num_nodes_in_truth = truth_dag.get_num_nodes()
+            data = np.zeros((100, len(truth_dag.nodes))) # just a placeholder
+            cg = pc(data, 0.05, d_separation, True, 0, -1, true_dag=truth_dag)
+            shd = SHD(truth_cpdag, cg.G)
+            print(
+                f'{bname} ({num_nodes_in_truth} nodes/{num_edges_in_truth} edges): used {cg.PC_elapsed:.5f}s, SHD: {shd.get_shd()}')
+
+        print('test_pc_load_bnlearn_graphs_with_d_separation passed!\n')
+
+
+
+    def test_d_sep(self):
+        from causallearn.graph.Edge import Edge
+        from causallearn.graph.Endpoint import Endpoint
+        from causallearn.graph.GeneralGraph import GeneralGraph
+        from causallearn.graph.GraphNode import GraphNode
+        from causallearn.graph.Node import Node
+        import networkx as nx
+        from itertools import chain, combinations
+
+        def _powerset(iterable):
+            "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+            s = list(iterable)
+            return list(chain.from_iterable(combinations(s, r) for r in range(len(s) + 1)))
+        def _random_permutation(adjmat):
+            P = np.random.permutation(np.eye(adjmat.shape[0]))
+            return P.T @ adjmat @ P
+        def _simulate_random_DAG(num_nodes, num_edges):
+            max_num_edges = num_nodes * (num_nodes - 1) // 2
+            assert 0 <= num_edges <= max_num_edges
+            upper_tria_vals = np.zeros((max_num_edges,))
+            upper_tria_vals[np.random.choice(np.arange(max_num_edges), num_edges, replace=False)] = 1
+            indu = np.triu_indices(num_nodes, 1)
+            adjmat = np.zeros((num_nodes, num_nodes))
+            adjmat[indu] = upper_tria_vals  # now adjmat[i, j] = 1 iff there is an edge from i to j (i < j)
+            adjmat = _random_permutation(adjmat)
+            directed_edges = set(map(tuple, np.argwhere(adjmat)))
+
+            # return a GeneralGraph object
+            g_causal_learn = GeneralGraph([])
+            node_map = {}
+            for node in range(num_nodes):
+                node_map[node] = GraphNode(str(node))
+                g_causal_learn.add_node(node_map[node])
+            for nfrom, nto in directed_edges:
+                edge = Edge(node_map[nfrom], node_map[nto], Endpoint.TAIL, Endpoint.ARROW)
+                g_causal_learn.add_edge(edge)
+
+            # return a networkx DirectedGraph object
+            g_networkx = nx.DiGraph()
+            g_networkx.add_nodes_from(list(range(num_nodes)))
+            g_networkx.add_edges_from(directed_edges)
+
+            return node_map, g_causal_learn, g_networkx
+
+        for nodenum in range(20, 30):
+            for _ in range(10):
+                avg_in_dgr = np.random.uniform(1., 2.)
+                num_edges = np.round(avg_in_dgr * nodenum).astype(int)
+                node_map, g_causal_learn, g_networkx = _simulate_random_DAG(nodenum, num_edges)
+                print(g_networkx.edges())
+                all_subsets = _powerset(range(nodenum))
+
+                for i in range(nodenum):
+                    for j in range(i, nodenum):
+                        for subset in random.sample(all_subsets, min(len(all_subsets), 20)):
+                            if i in subset or j in subset: continue
+
+                            tic = time.time()
+                            g_causal_learn_dsep = \
+                                g_causal_learn.is_dseparated_from(node_map[i], node_map[j], [node_map[_] for _ in subset])
+                            tac = time.time()
+                            time1 = tac - tic
+
+                            tic = time.time()
+                            g_networkx_dsep = \
+                                nx.d_separated(g_networkx, {i}, {j}, set(subset))
+                            tac = time.time()
+                            time2 = tac - tic
+
+                            assert g_causal_learn_dsep == g_networkx_dsep
+                            print(g_causal_learn_dsep, g_networkx_dsep, time1, time2)
+
+
+

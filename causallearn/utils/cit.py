@@ -14,6 +14,7 @@ mc_fisherz = "mc_fisherz"
 kci = "kci"
 chisq = "chisq"
 gsq = "gsq"
+d_separation = "d_separation"
 
 
 def CIT(data, method='fisherz', **kwargs):
@@ -34,6 +35,8 @@ def CIT(data, method='fisherz', **kwargs):
         return MV_FisherZ(data, **kwargs)
     elif method == mc_fisherz:
         return MC_FisherZ(data, **kwargs)
+    elif method == d_separation:
+        return D_Separation(data, **kwargs)
     else:
         raise ValueError("Unknown method: {}".format(method))
 
@@ -447,6 +450,25 @@ class MC_FisherZ(CIT_Base):
 
         virtual_cit = MV_FisherZ(data_vir)
         return virtual_cit(0, 1, tuple(cond_set_bgn_0))
+
+
+class D_Separation(CIT_Base):
+    def __init__(self, data, true_dag=None, **kwargs):
+        super().__init__(data, **kwargs)    # data is just a placeholder, not used in D_Separation
+        self.check_cache_method_consistent('d_separation', -1)  # -1: no parameters can be specified for d_separation
+        self.true_dag = true_dag
+        # now, true_dag is of GeneralGraph class.
+        # TODO (lower prioirity, since 1) this is only for testing, 2) graph class will be refactored):
+        #  1. ensure this graph is a dag
+        #  2. incorporate other graph classes, e.g., CausalGraph, Dag. And nx.DiGraph and nx.d_separated
+    def __call__(self, X, Y, condition_set=None):
+        Xs, Ys, condition_set, cache_key = self.get_formatted_XYZ_and_cachekey(X, Y, condition_set)
+        if cache_key in self.pvalue_cache: return self.pvalue_cache[cache_key]
+        p = float(self.true_dag.is_dseparated_from(
+            self.true_dag.nodes[Xs[0]], self.true_dag.nodes[Ys[0]], [self.true_dag.nodes[_] for _ in condition_set]))
+        # pvalue is 1. if is_d_separated and 0. otherwise. So heuristic uc_rules will not work.
+        self.pvalue_cache[cache_key] = p
+        return p
 
 
 
